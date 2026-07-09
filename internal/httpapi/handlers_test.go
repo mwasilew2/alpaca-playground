@@ -93,3 +93,37 @@ func TestWatchlist(t *testing.T) {
 		t.Errorf("watchlist = %v", syms)
 	}
 }
+
+func TestCORSHeaderOnErrorResponse(t *testing.T) {
+	// Spec: CORS header must be present on ALL responses, including errors.
+	rec := httptest.NewRecorder()
+	src := fakeStore{err: errors.New("boom")}
+	newTestServer(src).ServeHTTP(rec, httptest.NewRequest("GET", "/bars?symbol=AAPL&range=1d", nil))
+	if rec.Code != 502 {
+		t.Fatalf("code=%d, want 502", rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("CORS header missing on 502 error response")
+	}
+
+	// Also assert on a 400 validation error.
+	rec2 := httptest.NewRecorder()
+	newTestServer(fakeStore{}).ServeHTTP(rec2, httptest.NewRequest("GET", "/bars?symbol=AAPL&range=bogus", nil))
+	if rec2.Code != 400 {
+		t.Fatalf("code=%d, want 400", rec2.Code)
+	}
+	if rec2.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("CORS header missing on 400 error response")
+	}
+}
+
+func TestOptionsPreflight(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newTestServer(fakeStore{}).ServeHTTP(rec, httptest.NewRequest("OPTIONS", "/bars", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("OPTIONS code=%d, want 204", rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("CORS header missing on OPTIONS preflight")
+	}
+}
