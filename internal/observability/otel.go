@@ -39,6 +39,10 @@ func Setup(ctx context.Context, cfg *config.Config) (func(context.Context) error
 
 	useOTLP := cfg.OTLPEndpoint != ""
 
+	// Construct all fallible exporters first so that no provider (and its
+	// background goroutine) is created and installed as a global before we
+	// know every exporter can be built successfully.
+
 	// Traces
 	var spanExp sdktrace.SpanExporter
 	if useOTLP {
@@ -49,26 +53,17 @@ func Setup(ctx context.Context, cfg *config.Config) (func(context.Context) error
 	if err != nil {
 		return nil, err
 	}
-	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(spanExp), sdktrace.WithResource(res))
-	otel.SetTracerProvider(tp)
 
 	// Metrics
-	var metricReader sdkmetric.Reader
+	var metricExp sdkmetric.Exporter
 	if useOTLP {
-		me, e := otlpmetrichttp.New(ctx)
-		if e != nil {
-			return nil, e
-		}
-		metricReader = sdkmetric.NewPeriodicReader(me)
+		metricExp, err = otlpmetrichttp.New(ctx)
 	} else {
-		me, e := stdoutmetric.New()
-		if e != nil {
-			return nil, e
-		}
-		metricReader = sdkmetric.NewPeriodicReader(me)
+		metricExp, err = stdoutmetric.New()
 	}
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(metricReader), sdkmetric.WithResource(res))
-	otel.SetMeterProvider(mp)
+	if err != nil {
+		return nil, err
+	}
 
 	// Logs
 	var logExp sdklog.Exporter
@@ -80,6 +75,14 @@ func Setup(ctx context.Context, cfg *config.Config) (func(context.Context) error
 	if err != nil {
 		return nil, err
 	}
+
+	// All exporters succeeded; now construct providers and install globals.
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(spanExp), sdktrace.WithResource(res))
+	otel.SetTracerProvider(tp)
+
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp)), sdkmetric.WithResource(res))
+	otel.SetMeterProvider(mp)
+
 	lp := sdklog.NewLoggerProvider(
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
 		sdklog.WithResource(res),
