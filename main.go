@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -61,6 +62,7 @@ func run() error {
 	}
 
 	var wg sync.WaitGroup
+	srvErr := make(chan error, 2)
 
 	// Poller
 	wg.Add(1)
@@ -72,7 +74,7 @@ func run() error {
 		defer wg.Done()
 		slog.Info("api server listening", "addr", apiSrv.Addr)
 		if err := apiSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("api server error", "err", err)
+			srvErr <- fmt.Errorf("api server: %w", err)
 		}
 	}()
 
@@ -85,13 +87,23 @@ func run() error {
 			defer wg.Done()
 			slog.Info("admin server listening", "addr", adminSrv.Addr)
 			if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				slog.Error("admin server error", "err", err)
+				srvErr <- fmt.Errorf("admin server: %w", err)
 			}
 		}()
 	}
 
-	<-ctx.Done()
-	slog.Info("shutting down")
+	// Block until a shutdown signal (ctx) OR a fatal server error.
+	var runErr error
+	select {
+	case <-ctx.Done():
+		slog.Info("shutting down")
+	case err := <-srvErr:
+		slog.Error("server failed, shutting down", "err", err)
+		runErr = err
+	}
+	// Cancel ctx so ctx-consumers (e.g. the poller) unblock even when we
+	// arrived here via the srvErr branch rather than a signal.
+	stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -100,5 +112,12 @@ func run() error {
 		_ = adminSrv.Shutdown(shutdownCtx)
 	}
 	wg.Wait()
-	return shutdownOtel(shutdownCtx)
+
+	// Flush telemetry with its own budget so a slow HTTP drain can't starve it.
+	otelCtx, otelCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer otelCancel()
+	if err := shutdownOtel(otelCtx); err != nil && runErr == nil {
+		runErr = err
+	}
+	return runErr
 }
