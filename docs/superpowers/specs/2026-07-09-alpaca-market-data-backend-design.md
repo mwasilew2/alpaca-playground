@@ -66,8 +66,10 @@ alpaca-playground/
   cache hit/miss metrics.
 - **ranges** — pure logic, no I/O. Maps a range string to `{timeframe, lookback}` and
   slices a cached series down to the requested window. Fully unit-testable.
-- **poller** — every `POLL_INTERVAL`, refreshes each watchlist symbol's active (live)
-  timeframes through the store fetch path so served data stays near-real-time. A single
+- **poller** — every `POLL_INTERVAL`, refreshes each watchlist symbol's **intraday
+  timeframes** (`1Min`, `5Min`, `1Hour`) through the store fetch path so served data
+  stays near-real-time. Daily+ timeframes (`1Day`, `1Week`, `1Month`) change at most once
+  per day and are left to lazy read-through with a longer TTL rather than polled. A single
   symbol's failure is logged and never breaks the loop.
 - **httpapi** — our own JSON routes. Depends on `store` + `ranges`. Wrapped with
   `otelhttp` and a permissive CORS middleware.
