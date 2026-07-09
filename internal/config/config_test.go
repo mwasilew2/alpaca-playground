@@ -30,7 +30,7 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.PollInterval != 20*time.Second {
 		t.Errorf("poll = %v, want 20s", cfg.PollInterval)
 	}
-	if cfg.Port != "8080" || cfg.PprofAddr != ":6060" || cfg.CORSOrigin != "*" {
+	if cfg.Port != "8080" || cfg.PprofAddr != "127.0.0.1:6060" || cfg.CORSOrigin != "*" {
 		t.Errorf("bad defaults: %+v", cfg)
 	}
 	if cfg.ServiceName != "alpaca-playground" {

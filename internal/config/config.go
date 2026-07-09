@@ -32,7 +32,7 @@ func Load(getenv func(string) string) (*Config, error) {
 		AlpacaFeed:    def(getenv("ALPACA_FEED"), "iex"),
 		Watchlist:     parseList(getenv("WATCHLIST")),
 		Port:          def(getenv("PORT"), "8080"),
-		PprofAddr:     defAllowEmpty(getenv, "PPROF_ADDR", ":6060"),
+		PprofAddr:     defAllowEmpty(getenv, "PPROF_ADDR", "127.0.0.1:6060"),
 		CORSOrigin:    def(getenv("CORS_ORIGIN"), "*"),
 		OTLPEndpoint:  getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 		ServiceName:   def(getenv("OTEL_SERVICE_NAME"), "alpaca-playground"),

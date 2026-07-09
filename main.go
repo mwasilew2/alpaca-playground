@@ -51,7 +51,14 @@ func run() error {
 	pl := poller.New(st, cfg.Watchlist, ranges.LiveTimeframes(), cfg.PollInterval)
 	api := httpapi.New(st, cfg.Watchlist, cfg.CORSOrigin)
 
-	apiSrv := &http.Server{Addr: ":" + cfg.Port, Handler: api.Handler()}
+	apiSrv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           api.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	var wg sync.WaitGroup
 
