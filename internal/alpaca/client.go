@@ -24,11 +24,11 @@ type Client struct {
 	backoff    func(attempt int) time.Duration
 }
 
-// New builds a Client. doer is the underlying HTTP doer (e.g. an *http.Client);
-// its transport is wrapped with otelhttp so outbound calls are traced/metered.
-func New(baseURL, key, secret, feed string, doer oapi.HttpRequestDoer) (*Client, error) {
-	hc, ok := doer.(*http.Client)
-	if !ok || hc == nil {
+// New builds a Client. hc is the underlying *http.Client (a nil hc gets a
+// default with a 30s timeout); its transport is wrapped with otelhttp so
+// outbound calls are traced/metered.
+func New(baseURL, key, secret, feed string, hc *http.Client) (*Client, error) {
+	if hc == nil {
 		hc = &http.Client{Timeout: 30 * time.Second}
 	}
 	traced := *hc

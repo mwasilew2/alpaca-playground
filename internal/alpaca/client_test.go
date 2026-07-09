@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,7 +100,11 @@ func TestGetBars_ErrorsOn500(t *testing.T) {
 	defer ts.Close()
 
 	c := newTestClient(t, ts)
-	if _, err := c.GetBars(context.Background(), "AAPL", "1Min", time.Now().Add(-time.Hour), time.Now()); err == nil {
+	_, err := c.GetBars(context.Background(), "AAPL", "1Min", time.Now().Add(-time.Hour), time.Now())
+	if err == nil {
 		t.Fatal("expected error on 500")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error should mention status 500, got: %v", err)
 	}
 }
