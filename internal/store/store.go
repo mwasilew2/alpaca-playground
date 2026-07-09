@@ -68,6 +68,7 @@ func (s *Store) Get(ctx context.Context, symbol, timeframe string, start, end ti
 	}
 	s.mu.Unlock()
 
+	// Fetch happens outside the lock; two concurrent misses for the same key may both fetch. Accepted tradeoff (no singleflight).
 	if s.misses != nil {
 		s.misses.Add(ctx, 1)
 	}
