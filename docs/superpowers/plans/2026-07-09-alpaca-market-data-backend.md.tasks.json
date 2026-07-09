@@ -4,64 +4,64 @@
     {
       "id": 1,
       "subject": "Task 1: Domain type, config, and Makefile test target",
-      "status": "pending",
+      "status": "completed",
       "description": "Create leaf marketdata.Bar type + validated config.Config from env + .env.example + make test. TDD config_test then config.Load(getenv). See plan doc §Task 1.\n\n```json:metadata\n{\"files\": [\"internal/marketdata/bar.go\", \"internal/config/config.go\", \"internal/config/config_test.go\", \".env.example\", \"Makefile\", \".gitignore\"], \"verifyCommand\": \"go test ./internal/config/... -v\", \"acceptanceCriteria\": [\"Bar type with correct JSON tags\", \"Load errors without credentials\", \"defaults applied\", \"watchlist parsed and trimmed\"], \"modelTier\": \"mechanical\"}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: Ranges package (range -> timeframe mapping + slicing)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "Pure logic: Range, Spec{Timeframe,Lookback}, Start(now), Resolve, Slice, TTLForTimeframe, LiveTimeframes. See plan doc §Task 2.\n\n```json:metadata\n{\"files\": [\"internal/ranges/ranges.go\", \"internal/ranges/ranges_test.go\"], \"verifyCommand\": \"go test ./internal/ranges/... -v\", \"acceptanceCriteria\": [\"all ranges resolve to design-table timeframes\", \"unknown range errors\", \"all range uses 2016 epoch start\", \"Slice filters by T>=start\", \"TTL intraday < daily, LiveTimeframes = 1Min/5Min/1Hour\"], \"modelTier\": \"mechanical\"}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: Observability foundation (OpenTelemetry + pprof) and dependencies",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "go get otel modules; observability.Setup (global tracer/meter/logger, OTLP+stdout fallback, otelslog); AdminServer pprof. See plan doc §Task 3.\n\n```json:metadata\n{\"files\": [\"internal/observability/otel.go\", \"internal/observability/otel_test.go\", \"go.mod\", \"go.sum\"], \"verifyCommand\": \"go test ./internal/observability/... -v && go build ./...\", \"acceptanceCriteria\": [\"otel deps added and build succeeds\", \"Setup returns shutdown and sets globals\", \"stdout fallback with no endpoint\", \"AdminServer serves /debug/pprof/\"], \"modelTier\": \"frontier\"}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: Alpaca client wrapper (auth, feed, bars pagination + 429 retry)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1, 3],
       "description": "Wrap gen/oapi client: auth headers, feed, GetBars pagination + 429 retry + convert. Only package importing gen/oapi. See plan doc §Task 4.\n\n```json:metadata\n{\"files\": [\"internal/alpaca/client.go\", \"internal/alpaca/client_test.go\"], \"verifyCommand\": \"go test ./internal/alpaca/... -v\", \"acceptanceCriteria\": [\"auth headers + feed param sent\", \"pagination followed via next_page_token\", \"429 triggers bounded retry\", \"500 returns error\", \"otelhttp transport used\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 5,
       "subject": "Task 5: In-memory store (read-through cache keyed by symbol+timeframe)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1, 3],
       "description": "Thread-safe read-through cache; TTL + coverage; hit/miss meter counters. See plan doc §Task 5.\n\n```json:metadata\n{\"files\": [\"internal/store/store.go\", \"internal/store/store_test.go\"], \"verifyCommand\": \"go test ./internal/store/... -race -v\", \"acceptanceCriteria\": [\"fresh covered hit skips fetch\", \"stale entry refetches\", \"earlier start refetches\", \"race-free concurrent Get\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 6,
       "subject": "Task 6: Watchlist poller",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [5],
       "description": "Background ticker refreshing watchlist intraday timeframes via store; per-symbol error isolation; tick/error metrics. See plan doc §Task 6.\n\n```json:metadata\n{\"files\": [\"internal/poller/poller.go\", \"internal/poller/poller_test.go\"], \"verifyCommand\": \"go test ./internal/poller/... -race -v\", \"acceptanceCriteria\": [\"refreshes all symbol x timeframe per tick\", \"immediate first refresh\", \"per-symbol error does not stop loop\", \"returns on ctx cancel\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 7,
       "subject": "Task 7: HTTP API (handlers, CORS, otelhttp)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [2, 5],
       "description": "ServeMux routes /healthz /bars /watchlist; CORS + otelhttp; /bars validate+resolve+store+slice. See plan doc §Task 7.\n\n```json:metadata\n{\"files\": [\"internal/httpapi/handlers.go\", \"internal/httpapi/handlers_test.go\"], \"verifyCommand\": \"go test ./internal/httpapi/... -v\", \"acceptanceCriteria\": [\"healthz 200\", \"bars 200 sliced to range with envelope\", \"validation 400s\", \"upstream error 502\", \"watchlist array\", \"CORS header present\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 8,
       "subject": "Task 8: Wire everything in main.go (startup + graceful shutdown)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [4, 6, 7],
       "description": "Compose config/otel/alpaca/store/poller/httpapi in main; start API + admin + poller; graceful shutdown on SIGINT/SIGTERM. See plan doc §Task 8.\n\n```json:metadata\n{\"files\": [\"main.go\"], \"verifyCommand\": \"go build ./... && go vet ./... && make test\", \"acceptanceCriteria\": [\"build and vet clean\", \"missing credentials fail fast with exit 1\", \"SIGINT graceful shutdown\", \"make test passes\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 9,
       "subject": "Task 9: Codegen cleanup (drop unused server stubs)",
-      "status": "pending",
+      "status": "completed",
       "description": "Set std-http-server:false and regenerate; build+test still pass. See plan doc §Task 9.\n\n```json:metadata\n{\"files\": [\"gen/oapi/codegen.cfg.yml\", \"gen/oapi/server-oapi.gen.go\"], \"verifyCommand\": \"go build ./... && make test\", \"acceptanceCriteria\": [\"std-http-server false\", \"regenerated code builds\", \"make test passes\"], \"modelTier\": \"mechanical\"}\n```"
     }
   ],
-  "lastUpdated": "2026-07-09T00:00:00Z"
+  "lastUpdated": "2026-07-09T21:00:00Z"
 }
