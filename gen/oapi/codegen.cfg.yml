@@ -2,7 +2,7 @@ package: oapi
 generate:
   models: true
   client: true
-  std-http-server: true
+  std-http-server: false
   embedded-spec: true
 output-options:
   skip-prune: false
