@@ -205,8 +205,9 @@ endpoint is configured.
 
 The oapi-codegen config currently emits `std-http-server: true`, generating server stubs
 from Alpaca's *own* spec, which we don't use. Set `std-http-server: false` so only the
-client + models we actually use are generated. Re-run `make gen-oapi` (fetches a fresh
-spec, since `market-data-api.json` is currently empty) as part of implementation.
+client + models we actually use are generated, then regenerate. The spec file
+`market-data-api.json` is already present (~140KB, minified to a single line), so codegen
+can run offline without re-fetching if needed.
 
 ## 11. New Dependencies
 
