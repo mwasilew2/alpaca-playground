@@ -18,8 +18,10 @@ func newTestClient(t *testing.T, ts *httptest.Server) *Client {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	c.backoff = func(int) time.Duration { return time.Millisecond }
-	c.maxRetries = 3
+	// Make retries instant and bounded so retry tests stay fast.
+	c.rc.RetryWaitMin = time.Millisecond
+	c.rc.RetryWaitMax = time.Millisecond
+	c.rc.RetryMax = 3
 	return c
 }
 
@@ -90,6 +92,31 @@ func TestGetBars_RetriesOn429(t *testing.T) {
 	}
 	if len(bars) != 1 || calls.Load() != 3 {
 		t.Errorf("calls=%d bars=%d, want 3 calls and 1 bar", calls.Load(), len(bars))
+	}
+}
+
+func TestGetBars_Retries5xxThenSucceeds(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable) // 503: transient, retryable
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"bars":            map[string]any{"AAPL": []map[string]any{{"t": "2026-07-09T13:30:00Z", "c": 1}}},
+			"next_page_token": nil,
+		})
+	}))
+	defer ts.Close()
+
+	c := newTestClient(t, ts)
+	bars, err := c.GetBars(context.Background(), "AAPL", "1Min", time.Now().Add(-time.Hour), time.Now())
+	if err != nil {
+		t.Fatalf("expected success after 5xx retries, got %v", err)
+	}
+	if len(bars) != 1 || calls.Load() != 3 {
+		t.Errorf("calls=%d bars=%d, want 3 calls and 1 bar (5xx should be retried)", calls.Load(), len(bars))
 	}
 }
 
