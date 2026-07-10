@@ -7,18 +7,19 @@ package alpaca
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/mwasilew2/alpaca-playground/gen/oapi"
 	"github.com/mwasilew2/alpaca-playground/internal/marketdata"
+	"github.com/mwasilew2/alpaca-playground/internal/observability"
 
 	"github.com/hashicorp/go-retryablehttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -97,14 +98,20 @@ func (c *Client) GetBars(ctx context.Context, symbol, timeframe string, start, e
 
 		resp, err := c.oc.StockBarsWithResponse(ctx, params)
 		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "request failed")
+			kind := observability.KindUpstream
+			if errors.Is(err, context.DeadlineExceeded) {
+				kind = observability.KindTimeout
+			}
+			observability.RecordError(ctx, observability.ComponentAlpaca, kind, err)
 			return nil, err
 		}
 		if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
 			err := fmt.Errorf("alpaca stock bars: unexpected status %d", resp.StatusCode())
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "unexpected status")
+			kind := observability.KindUpstream
+			if resp.StatusCode() == http.StatusTooManyRequests {
+				kind = observability.KindRateLimited
+			}
+			observability.RecordError(ctx, observability.ComponentAlpaca, kind, err)
 			return nil, err
 		}
 
