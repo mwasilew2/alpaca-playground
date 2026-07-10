@@ -5,9 +5,11 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/mwasilew2/alpaca-playground/internal/observability"
 	"github.com/mwasilew2/alpaca-playground/internal/store"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -36,14 +38,12 @@ type Poller struct {
 
 	tracer trace.Tracer
 	ticks  metric.Int64Counter
-	errs   metric.Int64Counter
 }
 
 // New builds a Poller for the given symbols and (live) timeframes.
 func New(s *store.Store, symbols, timeframes []string, interval time.Duration) *Poller {
 	m := otel.Meter("alpaca-playground/poller")
 	ticks, _ := m.Int64Counter("poller.ticks")
-	errs, _ := m.Int64Counter("poller.errors")
 	return &Poller{
 		store:      s,
 		symbols:    symbols,
@@ -52,7 +52,6 @@ func New(s *store.Store, symbols, timeframes []string, interval time.Duration) *
 		now:        time.Now,
 		tracer:     otel.Tracer("alpaca-playground/poller"),
 		ticks:      ticks,
-		errs:       errs,
 	}
 }
 
@@ -85,9 +84,8 @@ func (p *Poller) refresh(ctx context.Context) {
 		for _, tf := range p.timeframes {
 			start := now.Add(-windowFor(tf))
 			if _, err := p.store.Get(ctx, sym, tf, start, now); err != nil {
-				if p.errs != nil {
-					p.errs.Add(ctx, 1)
-				}
+				span.SetStatus(codes.Error, "refresh error")
+				observability.CountError(ctx, observability.ComponentPoller, observability.KindUpstream)
 				slog.WarnContext(ctx, "poller refresh failed", "symbol", sym, "timeframe", tf, "err", err)
 			}
 		}
