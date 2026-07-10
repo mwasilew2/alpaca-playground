@@ -11,6 +11,8 @@ import (
 	"github.com/mwasilew2/alpaca-playground/internal/ranges"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // barSource is the store dependency the API needs (satisfied by *store.Store).
@@ -37,7 +39,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /bars", s.handleBars)
 	mux.HandleFunc("GET /watchlist", s.handleWatchlist)
-	return otelhttp.NewHandler(s.cors(mux), "http.server")
+	// Name each server span after the route (e.g. "GET /bars") instead of a
+	// single static "http.server", so traces are legible per endpoint.
+	return otelhttp.NewHandler(s.cors(mux), "http.server",
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			return r.Method + " " + r.URL.Path
+		}),
+	)
 }
 
 func (s *Server) cors(next http.Handler) http.Handler {
@@ -85,11 +93,19 @@ func (s *Server) handleBars(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enrich the otelhttp server span so this request's trace, its logs, and its
+	// metric exemplars all share the same symbol/range/timeframe context.
+	trace.SpanFromContext(r.Context()).SetAttributes(
+		attribute.String("symbol", symbol),
+		attribute.String("range", rangeStr),
+		attribute.String("timeframe", spec.Timeframe),
+	)
+
 	now := s.now()
 	start := spec.Start(now)
 	bars, err := s.src.Get(r.Context(), symbol, spec.Timeframe, start, now)
 	if err != nil {
-		slog.Error("bars fetch failed", "symbol", symbol, "range", rangeStr, "err", err)
+		slog.ErrorContext(r.Context(), "bars fetch failed", "symbol", symbol, "range", rangeStr, "err", err)
 		writeError(w, http.StatusBadGateway, "upstream market data error")
 		return
 	}

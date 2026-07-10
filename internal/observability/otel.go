@@ -12,6 +12,8 @@ import (
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -90,6 +92,14 @@ func Setup(ctx context.Context, cfg *config.Config) (func(context.Context) error
 	)
 	otellog.SetLoggerProvider(lp)
 	slog.SetDefault(slog.New(otelslog.NewHandler(cfg.ServiceName)))
+
+	// Propagate W3C trace context (and baggage) so an incoming traceparent is
+	// extracted and outbound HTTP calls carry it — enabling correlation across
+	// service boundaries, not just within this process.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 
 	shutdown := func(ctx context.Context) error {
 		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx), lp.Shutdown(ctx))
