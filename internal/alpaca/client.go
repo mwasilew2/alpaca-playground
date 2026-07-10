@@ -13,6 +13,10 @@ import (
 	"github.com/mwasilew2/alpaca-playground/internal/marketdata"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Client wraps the generated Alpaca market-data client with auth, feed, and the
@@ -22,6 +26,7 @@ type Client struct {
 	feed       oapi.StockHistoricalFeed
 	maxRetries int
 	backoff    func(attempt int) time.Duration
+	tracer     trace.Tracer
 }
 
 // New builds a Client. hc is the underlying *http.Client (a nil hc gets a
@@ -51,12 +56,19 @@ func New(baseURL, key, secret, feed string, hc *http.Client) (*Client, error) {
 		feed:       oapi.StockHistoricalFeed(feed),
 		maxRetries: 4,
 		backoff:    func(attempt int) time.Duration { return time.Duration(attempt) * 500 * time.Millisecond },
+		tracer:     otel.Tracer("alpaca-playground/alpaca"),
 	}, nil
 }
 
 // GetBars fetches all bars for one symbol/timeframe in [start,end], following
 // pagination and retrying on HTTP 429.
 func (c *Client) GetBars(ctx context.Context, symbol, timeframe string, start, end time.Time) ([]marketdata.Bar, error) {
+	ctx, span := c.tracer.Start(ctx, "alpaca.GetBars", trace.WithAttributes(
+		attribute.String("symbol", symbol),
+		attribute.String("timeframe", timeframe),
+	))
+	defer span.End()
+
 	var out []marketdata.Bar
 	var pageToken *string
 
@@ -72,10 +84,15 @@ func (c *Client) GetBars(ctx context.Context, symbol, timeframe string, start, e
 
 		resp, err := c.doWithRetry(ctx, params)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "request failed")
 			return nil, err
 		}
 		if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-			return nil, fmt.Errorf("alpaca stock bars: unexpected status %d", resp.StatusCode())
+			err := fmt.Errorf("alpaca stock bars: unexpected status %d", resp.StatusCode())
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "unexpected status")
+			return nil, err
 		}
 
 		for _, sb := range resp.JSON200.Bars[symbol] {
@@ -83,6 +100,7 @@ func (c *Client) GetBars(ctx context.Context, symbol, timeframe string, start, e
 		}
 
 		if resp.JSON200.NextPageToken == nil || *resp.JSON200.NextPageToken == "" {
+			span.SetAttributes(attribute.Int("bars.count", len(out)))
 			return out, nil
 		}
 		pageToken = resp.JSON200.NextPageToken

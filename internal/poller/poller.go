@@ -9,6 +9,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // windowFor is how much history the poller keeps warm per intraday timeframe.
@@ -33,8 +34,9 @@ type Poller struct {
 	interval   time.Duration
 	now        func() time.Time
 
-	ticks metric.Int64Counter
-	errs  metric.Int64Counter
+	tracer trace.Tracer
+	ticks  metric.Int64Counter
+	errs   metric.Int64Counter
 }
 
 // New builds a Poller for the given symbols and (live) timeframes.
@@ -48,6 +50,7 @@ func New(s *store.Store, symbols, timeframes []string, interval time.Duration) *
 		timeframes: timeframes,
 		interval:   interval,
 		now:        time.Now,
+		tracer:     otel.Tracer("alpaca-playground/poller"),
 		ticks:      ticks,
 		errs:       errs,
 	}
@@ -69,6 +72,11 @@ func (p *Poller) Run(ctx context.Context) {
 }
 
 func (p *Poller) refresh(ctx context.Context) {
+	// The poller is not request-driven, so each tick starts its own root span;
+	// the store/alpaca spans it triggers nest beneath it as one trace.
+	ctx, span := p.tracer.Start(ctx, "poller.refresh")
+	defer span.End()
+
 	if p.ticks != nil {
 		p.ticks.Add(ctx, 1)
 	}
@@ -80,7 +88,7 @@ func (p *Poller) refresh(ctx context.Context) {
 				if p.errs != nil {
 					p.errs.Add(ctx, 1)
 				}
-				slog.Warn("poller refresh failed", "symbol", sym, "timeframe", tf, "err", err)
+				slog.WarnContext(ctx, "poller refresh failed", "symbol", sym, "timeframe", tf, "err", err)
 			}
 		}
 	}
