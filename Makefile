@@ -1,7 +1,7 @@
 SPEC_URL := https://docs.alpaca.markets/us/openapi/market-data-api.json
 SPEC_FILE := gen/oapi/market-data-api.json
 
-.PHONY: fetch-spec gen-oapi test run otel-smoke
+.PHONY: fetch-spec gen-oapi test run otel-smoke signoz-up signoz-down signoz-logs signoz-setup run-otlp
 
 fetch-spec:
 	curl -fsSL --remove-on-error $(SPEC_URL) -o $(SPEC_FILE)
@@ -20,3 +20,21 @@ run:
 # logs, metrics, and traces. Requires python3 and jq.
 otel-smoke:
 	./scripts/otel-correlation-smoke.sh
+
+# --- Local SigNoz (OTel-native observability backend) — see deploy/signoz/README.md ---
+signoz-up:
+	cd deploy/signoz && docker compose up -d
+
+signoz-down:
+	cd deploy/signoz && docker compose down
+
+signoz-logs:
+	cd deploy/signoz && docker compose logs -f --tail 100
+
+# REQUIRED once after signoz-up: creates the admin/org so the collector opens its OTLP receiver.
+signoz-setup:
+	./deploy/signoz/setup.sh
+
+# Run the app pointed at local SigNoz (port 8081 to avoid SigNoz UI on 8080). Needs your .env Alpaca creds.
+run-otlp:
+	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 PORT=8081 go run .
