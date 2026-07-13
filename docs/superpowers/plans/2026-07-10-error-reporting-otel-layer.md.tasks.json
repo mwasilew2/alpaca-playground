@@ -4,23 +4,23 @@
     {
       "id": 1,
       "subject": "Task 1: Error helper (internal/observability/errors.go)",
-      "status": "pending",
+      "status": "completed",
       "description": "Implement RecordError (exception+stacktrace+Error status+per-component counter) and CountError (counter only) + Component*/Kind* consts, with unit tests (SpanRecorder + ManualReader). See plan doc §Task 1.\n\n```json:metadata\n{\"files\": [\"internal/observability/errors.go\", \"internal/observability/errors_test.go\"], \"verifyCommand\": \"go test ./internal/observability/... -race -v\", \"acceptanceCriteria\": [\"RecordError records exception with non-empty stacktrace + Error status + alpaca.errors{kind} counter\", \"CountError increments counter only, no span change/exception\", \"counter resolved from current global meter (no stale cache)\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: Wire alpaca (origin) and store to the helper",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "alpaca.GetBars: RecordError at both error sites with kind classifier (timeout/rate_limited/upstream); drop codes import. store.Get: drop span.RecordError, keep SetStatus. See plan doc §Task 2.\n\n```json:metadata\n{\"files\": [\"internal/alpaca/client.go\", \"internal/store/store.go\"], \"verifyCommand\": \"go build ./... && go test ./internal/alpaca/... ./internal/store/... -race\", \"acceptanceCriteria\": [\"alpaca RecordError at both error sites with kind rate_limited/timeout/upstream\", \"client.go no longer imports codes / calls span.RecordError directly\", \"store.Get keeps SetStatus, drops span.RecordError\", \"existing alpaca+store tests pass\"], \"modelTier\": \"mechanical\"}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: Wire poller and httpapi to the helper",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "poller: remove errs field; refresh error → SetStatus + CountError(poller,upstream) + WarnContext. httpapi: CountError(httpapi,upstream) on 502, CountError(httpapi,validation) on both 400s. Confirm via make otel-smoke. See plan doc §Task 3.\n\n```json:metadata\n{\"files\": [\"internal/poller/poller.go\", \"internal/httpapi/handlers.go\"], \"verifyCommand\": \"go build ./... && go test ./... -race\", \"acceptanceCriteria\": [\"poller drops errs field; refresh error sets span status + CountError(poller,upstream) + WarnContext\", \"handleBars CountError(httpapi,upstream) on 502 and CountError(httpapi,validation) on both 400s\", \"existing poller+httpapi tests pass\", \"make otel-smoke shows exception.stacktrace + *.errors counters\"], \"modelTier\": \"mechanical\"}\n```"
     }
   ],
-  "lastUpdated": "2026-07-10T00:00:00Z"
+  "lastUpdated": "2026-07-10T23:30:00Z"
 }
