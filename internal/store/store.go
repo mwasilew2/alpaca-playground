@@ -87,7 +87,6 @@ func (s *Store) Get(ctx context.Context, symbol, timeframe string, start, end ti
 	}
 	bars, err := s.fetch(ctx, symbol, timeframe, start, end)
 	if err != nil {
-		span.RecordError(err)
 		span.SetStatus(codes.Error, "upstream fetch failed")
 		return nil, err
 	}

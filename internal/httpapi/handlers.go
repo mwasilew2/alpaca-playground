@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mwasilew2/alpaca-playground/internal/marketdata"
+	"github.com/mwasilew2/alpaca-playground/internal/observability"
 	"github.com/mwasilew2/alpaca-playground/internal/ranges"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -83,12 +84,14 @@ func (s *Server) handleBars(w http.ResponseWriter, r *http.Request) {
 	symbol := r.URL.Query().Get("symbol")
 	rangeStr := r.URL.Query().Get("range")
 	if symbol == "" {
+		observability.CountError(r.Context(), observability.ComponentHTTP, observability.KindValidation)
 		writeError(w, http.StatusBadRequest, "missing required query param: symbol")
 		return
 	}
 	rng := ranges.Range(rangeStr)
 	spec, err := ranges.Resolve(rng)
 	if err != nil {
+		observability.CountError(r.Context(), observability.ComponentHTTP, observability.KindValidation)
 		writeError(w, http.StatusBadRequest, "invalid range: "+rangeStr)
 		return
 	}
@@ -106,6 +109,7 @@ func (s *Server) handleBars(w http.ResponseWriter, r *http.Request) {
 	bars, err := s.src.Get(r.Context(), symbol, spec.Timeframe, start, now)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "bars fetch failed", "symbol", symbol, "range", rangeStr, "err", err)
+		observability.CountError(r.Context(), observability.ComponentHTTP, observability.KindUpstream)
 		writeError(w, http.StatusBadGateway, "upstream market data error")
 		return
 	}
