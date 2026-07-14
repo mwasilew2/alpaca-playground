@@ -71,3 +71,29 @@ curl -fsSL https://signoz.io/foundry.sh | bash          # installs foundryctl
 foundryctl forge -f deploy/signoz/casting.yaml -p /tmp/pours
 cp -r /tmp/pours/deployment/. deploy/signoz/             # re-vendor compose + configs
 ```
+
+## Troubleshooting
+
+**Nothing lands in SigNoz (empty Logs/Traces) even though the app is running.**
+The collector accepts OTLP (HTTP 200) but can't write to ClickHouse. Check:
+
+```bash
+make signoz-logs   # look for: "Table is in readonly mode ... not found in zookeeper"
+```
+
+That means ClickHouse's replicated tables lost their metadata in ClickHouse-Keeper
+(can happen if a `docker compose up` recreates ClickHouse and the keeper
+inconsistently). The telemetry stores are rebuildable; recover by wiping just the
+ClickHouse + keeper volumes (Postgres holds your login/org — keep it):
+
+```bash
+cd deploy/signoz
+docker compose down
+docker volume rm signoz-telemetrystore-0-0-data \
+                 signoz-telemetrykeeper-0-data \
+                 signoz-telemetrystore-user-scripts
+docker compose up -d      # the migrator recreates the schema with fresh keeper metadata
+```
+
+Pinning the image tags in `compose.yaml` (instead of `:latest`) avoids surprise
+recreates from pulling new versions.
