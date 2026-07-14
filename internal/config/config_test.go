@@ -82,3 +82,25 @@ func TestLoad_InvalidPollInterval(t *testing.T) {
 		t.Fatal("expected error for invalid POLL_INTERVAL")
 	}
 }
+
+func TestAlpacaBaseURLWarning(t *testing.T) {
+	cases := []struct {
+		url  string
+		warn bool
+	}{
+		{"https://data.alpaca.markets", false},        // correct
+		{"https://data.alpaca.markets/", false},       // trailing slash is fine
+		{"http://127.0.0.1:58399", false},             // local test stub, no path
+		{"https://paper-api.alpaca.markets", true},    // wrong host (trading API)
+		{"https://api.alpaca.markets", true},          // wrong host (trading API)
+		{"https://paper-api.alpaca.markets/v2", true}, // wrong host + path
+		{"https://data.alpaca.markets/v2", true},      // right host, stray path
+	}
+	for _, tc := range cases {
+		c := &Config{AlpacaBaseURL: tc.url}
+		got := c.AlpacaBaseURLWarning()
+		if (got != "") != tc.warn {
+			t.Errorf("AlpacaBaseURLWarning(%q) = %q; want warn=%v", tc.url, got, tc.warn)
+		}
+	}
+}
