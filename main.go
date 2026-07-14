@@ -40,10 +40,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if w := cfg.AlpacaBaseURLWarning(); w != "" {
-		slog.Warn("ALPACA_BASE_URL looks misconfigured for market data",
-			"url", cfg.AlpacaBaseURL, "detail", w)
-	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

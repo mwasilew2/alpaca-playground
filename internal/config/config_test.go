@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -102,5 +105,30 @@ func TestAlpacaBaseURLWarning(t *testing.T) {
 		if (got != "") != tc.warn {
 			t.Errorf("AlpacaBaseURLWarning(%q) = %q; want warn=%v", tc.url, got, tc.warn)
 		}
+	}
+}
+
+func TestLoad_EmitsBaseURLWarning(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	base := map[string]string{"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s"}
+
+	bad := envFrom(map[string]string{"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s", "ALPACA_BASE_URL": "https://paper-api.alpaca.markets/v2"})
+	if _, err := Load(bad); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "misconfigured") {
+		t.Errorf("expected Load to warn on bad base URL; logs: %q", buf.String())
+	}
+
+	buf.Reset()
+	if _, err := Load(envFrom(base)); err != nil { // default base URL is data.alpaca.markets
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(buf.String(), "misconfigured") {
+		t.Errorf("did not expect a warning for the default base URL; logs: %q", buf.String())
 	}
 }

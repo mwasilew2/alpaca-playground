@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -51,6 +52,11 @@ func Load(getenv func(string) string) (*Config, error) {
 
 	if cfg.AlpacaKey == "" || cfg.AlpacaSecret == "" {
 		return nil, errors.New("ALPACA_API_KEY and ALPACA_API_SECRET are required")
+	}
+
+	if w := cfg.AlpacaBaseURLWarning(); w != "" {
+		slog.Warn("ALPACA_BASE_URL looks misconfigured for market data",
+			"url", cfg.AlpacaBaseURL, "detail", w)
 	}
 	return cfg, nil
 }
