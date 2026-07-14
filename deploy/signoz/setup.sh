@@ -10,7 +10,7 @@
 # Dev-only default credentials — override via env for anything shared.
 set -euo pipefail
 
-UI="${SIGNOZ_UI:-http://localhost:8080}"
+UI="${SIGNOZ_UI:-http://localhost:8081}"
 EMAIL="${SIGNOZ_EMAIL:-admin@alpaca.local}"
 PASSWORD="${SIGNOZ_PASSWORD:-Alpaca12345!}"
 ORG="${SIGNOZ_ORG:-alpaca}"

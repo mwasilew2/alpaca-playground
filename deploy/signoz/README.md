@@ -22,7 +22,7 @@ make signoz-setup   # REQUIRED first run: create the admin/org (see below)
 make run-otlp       # run the app pointed at SigNoz (needs your .env Alpaca creds)
 ```
 
-Then open the UI at **http://localhost:8080** and log in with the credentials
+Then open the UI at **http://localhost:8081** and log in with the credentials
 printed by `make signoz-setup` (default `admin@alpaca.local` / `Alpaca12345!`).
 Errors appear under **Exceptions**; traces under **Traces**.
 
@@ -41,14 +41,14 @@ admin/org via the API (idempotent), after which the collector opens its
 receiver within ~30s. You can also do this once by hand via the UI onboarding.
 
 ## Ports
-- `8080` — SigNoz UI / API (**collides with the app's default port**; `make run-otlp` runs the app on `8081`)
+- `8081` — SigNoz UI / API (host port; the container serves 8080 internally). Kept off `8080` so it doesn't collide with the app.
 - `4317` — OTLP gRPC ingestion
 - `4318` — OTLP HTTP ingestion (the app's exporters use this)
 
 ## Pointing the app at it manually
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 PORT=8081 go run .
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 go run .   # app stays on :8080
 ```
 
 `internal/observability` switches from stdout to OTLP whenever

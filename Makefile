@@ -35,6 +35,6 @@ signoz-logs:
 signoz-setup:
 	./deploy/signoz/setup.sh
 
-# Run the app pointed at local SigNoz (port 8081 to avoid SigNoz UI on 8080). Needs your .env Alpaca creds.
+# Run the app (on its default :8080) pointed at local SigNoz. Needs your .env Alpaca creds.
 run-otlp:
-	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 PORT=8081 go run .
+	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 go run .
