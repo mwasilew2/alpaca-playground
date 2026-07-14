@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"github.com/mwasilew2/alpaca-playground/internal/alpaca"
 	"github.com/mwasilew2/alpaca-playground/internal/config"
 	"github.com/mwasilew2/alpaca-playground/internal/httpapi"
@@ -29,6 +31,11 @@ func main() {
 }
 
 func run() error {
+	// Load .env into the process environment if present. Load (vs Overload) does
+	// not override variables already set, so real env vars still win over .env.
+	// Missing .env is not an error.
+	_ = godotenv.Load()
+
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		return err
