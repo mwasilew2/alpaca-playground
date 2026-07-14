@@ -17,10 +17,14 @@ re-vendor (see "Regenerating" below).
 ## Quick start (from the repo root)
 
 ```bash
-make signoz-up      # start the stack (ClickHouse, collector, UI, Postgres, keeper)
-make signoz-setup   # REQUIRED first run: create the admin/org (see below)
-make run-otlp       # run the app pointed at SigNoz (needs your .env Alpaca creds)
+make run        # starts SigNoz (up + first-run setup + wait) AND the app, wired together
 ```
+
+`make run` brings up SigNoz, creates the admin/org on first run, waits for the
+collector's OTLP receiver, then runs the app (on `:8080`) shipping telemetry to
+SigNoz. It needs your Alpaca creds in `.env`. To run just the app without SigNoz,
+use `make run-app`. The individual steps (`signoz-up`, `signoz-setup`,
+`signoz-wait`, `signoz-down`, `signoz-logs`) are also available.
 
 Then open the UI at **http://localhost:8081** and log in with the credentials
 printed by `make signoz-setup` (default `admin@alpaca.local` / `Alpaca12345!`).

@@ -1,7 +1,7 @@
 SPEC_URL := https://docs.alpaca.markets/us/openapi/market-data-api.json
 SPEC_FILE := gen/oapi/market-data-api.json
 
-.PHONY: fetch-spec gen-oapi test run otel-smoke signoz-up signoz-down signoz-logs signoz-setup run-otlp
+.PHONY: fetch-spec gen-oapi test run run-app otel-smoke signoz-up signoz-down signoz-logs signoz-setup signoz-wait
 
 fetch-spec:
 	curl -fsSL --remove-on-error $(SPEC_URL) -o $(SPEC_FILE)
@@ -12,7 +12,14 @@ gen-oapi: fetch-spec
 test:
 	go test ./... -race
 
-run:
+# Full local stack: start SigNoz (idempotent), ensure it is set up and its OTLP
+# receiver is ready, then run the app (on :8080) shipping telemetry to SigNoz.
+run: signoz-up signoz-setup signoz-wait
+	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 go run .
+
+# Run only the application, without SigNoz. Telemetry goes to stdout unless
+# OTEL_EXPORTER_OTLP_ENDPOINT is set in your .env.
+run-app:
 	go run .
 
 # End-to-end telemetry smoke test: boots the server with stdout OTel exporters,
@@ -35,6 +42,12 @@ signoz-logs:
 signoz-setup:
 	./deploy/signoz/setup.sh
 
-# Run the app (on its default :8080) pointed at local SigNoz. Needs your .env Alpaca creds.
-run-otlp:
-	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 go run .
+# Wait until the collector's OTLP receiver accepts data (it comes up ~30s after setup).
+signoz-wait:
+	@echo "==> waiting for SigNoz OTLP receiver on :4318 ..."
+	@for i in $$(seq 1 30); do \
+	  code=$$(curl -s -m 3 -o /dev/null -w '%{http_code}' -X POST http://localhost:4318/v1/traces \
+	    -H 'Content-Type: application/json' -d '{"resourceSpans":[]}' 2>/dev/null); \
+	  if [ "$$code" = "200" ]; then echo "==> OTLP ready"; break; fi; \
+	  sleep 3; \
+	done
