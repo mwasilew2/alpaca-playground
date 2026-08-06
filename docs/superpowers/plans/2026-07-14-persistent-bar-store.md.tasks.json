@@ -77,6 +77,7 @@
     {
       "id": "5",
       "subject": "Task 5: Swap Store to repository+coverage policy and wire it up",
+      "status": "completed",
       "blockedBy": ["1", "2", "3", "4"],
       "files": [
         "internal/store/store.go",
