@@ -1,0 +1,96 @@
+{
+  "plan": "docs/superpowers/plans/2026-07-14-persistent-bar-store.md",
+  "spec": "docs/superpowers/specs/2026-07-14-persistent-bar-store-design.md",
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Task 1: Coverage interval math (pure)",
+      "blockedBy": [],
+      "files": ["internal/store/coverage.go", "internal/store/coverage_test.go"],
+      "verifyCommand": "go test ./internal/store/ -run 'Coalesce|Plan' -race -v",
+      "acceptanceCriteria": [
+        "Coalesce merges overlapping/adjacent taking max FetchedAt",
+        "Plan returns empty when fully covered (historical any / live fresh)",
+        "Plan returns gaps + stale live tail only",
+        "sub-threshold gaps merged"
+      ],
+      "modelTier": "standard"
+    },
+    {
+      "id": "2",
+      "subject": "Task 2: Repository port + memRepo + contract suite",
+      "blockedBy": ["1"],
+      "files": [
+        "internal/store/repository.go",
+        "internal/store/memory.go",
+        "internal/store/memory_test.go",
+        "internal/store/storetest/contract.go",
+        "internal/ranges/ranges.go",
+        "internal/ranges/ranges_livehorizon_test.go"
+      ],
+      "verifyCommand": "go test ./internal/store/... ./internal/ranges/... -race",
+      "acceptanceCriteria": [
+        "Repository interface defined",
+        "memRepo range-slices + upserts by T",
+        "PutIntervals replaces set; Intervals round-trips",
+        "RunRepositoryContract passes for memRepo",
+        "LiveHorizonForTimeframe returns spec values, >= ttl"
+      ],
+      "modelTier": "standard"
+    },
+    {
+      "id": "3",
+      "subject": "Task 3: SQLite adapter (sqlitestore)",
+      "blockedBy": ["2"],
+      "files": [
+        "internal/store/sqlitestore/sqlitestore.go",
+        "internal/store/sqlitestore/sqlitestore_test.go",
+        "go.mod",
+        "go.sum"
+      ],
+      "verifyCommand": "go test ./internal/store/sqlitestore/ -race -v",
+      "acceptanceCriteria": [
+        "Open creates dir+DB, sets PRAGMAs, migrates schema v1",
+        "implements Repository (Bars SQL slice, PutBars upsert, PutIntervals replace-in-txn)",
+        "RunRepositoryContract passes on a temp-dir DB"
+      ],
+      "modelTier": "standard"
+    },
+    {
+      "id": "4",
+      "subject": "Task 4: Config — storage backend selection",
+      "blockedBy": [],
+      "files": ["internal/config/config.go", "internal/config/config_test.go", ".env.example"],
+      "verifyCommand": "go test ./internal/config/... -race -v",
+      "acceptanceCriteria": [
+        "Config gains StorageBackend (default memory) + StoragePath (default ./data/cache.db)",
+        "Load rejects STORAGE other than memory|disk",
+        ".env.example documents both"
+      ],
+      "modelTier": "mechanical"
+    },
+    {
+      "id": "5",
+      "subject": "Task 5: Swap Store to repository+coverage policy and wire it up",
+      "blockedBy": ["1", "2", "3", "4"],
+      "files": [
+        "internal/store/store.go",
+        "internal/store/coverage.go",
+        "internal/store/store_test.go",
+        "internal/store/store_correlation_test.go",
+        "main.go",
+        "internal/httpapi/handlers.go"
+      ],
+      "verifyCommand": "go build ./... && go vet ./... && go test ./... -race",
+      "acceptanceCriteria": [
+        "New(fetch,repo,ttl,liveHorizon); Get signature unchanged",
+        "fully-covered Get does no fetch; miss fetches only planned ranges + records empty intervals",
+        "concurrent same-key Get does not double-fetch",
+        "persist failure degrades (serves repo ∪ fresh), does not return error",
+        "main selects memRepo/sqlitestore per config, defer Close, disk-open failure fatal",
+        "httpapi drops redundant ranges.Slice; whole suite green"
+      ],
+      "modelTier": "standard"
+    }
+  ]
+}
