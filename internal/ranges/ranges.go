@@ -110,3 +110,24 @@ func TTLForTimeframe(tf string) time.Duration {
 func LiveTimeframes() []string {
 	return []string{"1Min", "5Min", "1Hour"}
 }
+
+// LiveHorizonForTimeframe is how far back from now bars are still mutable
+// (current/last-few periods + late trades). Older bars are treated as immutable.
+func LiveHorizonForTimeframe(tf string) time.Duration {
+	switch tf {
+	case "1Min":
+		return 15 * time.Minute
+	case "5Min":
+		return time.Hour
+	case "1Hour":
+		return 6 * time.Hour
+	case "1Day":
+		return 48 * time.Hour
+	case "1Week":
+		return 14 * 24 * time.Hour
+	case "1Month":
+		return 60 * 24 * time.Hour
+	default:
+		return 24 * time.Hour
+	}
+}
