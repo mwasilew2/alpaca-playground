@@ -132,3 +132,24 @@ func TestLoad_EmitsBaseURLWarning(t *testing.T) {
 		t.Errorf("did not expect a warning for the default base URL; logs: %q", buf.String())
 	}
 }
+
+func TestLoad_StorageDefaults(t *testing.T) {
+	cfg, err := Load(envFrom(map[string]string{"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StorageBackend != "memory" || cfg.StoragePath != "./data/cache.db" {
+		t.Errorf("storage defaults wrong: %q %q", cfg.StorageBackend, cfg.StoragePath)
+	}
+}
+
+func TestLoad_StorageValidation(t *testing.T) {
+	_, err := Load(envFrom(map[string]string{"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s", "STORAGE": "s3"}))
+	if err == nil {
+		t.Fatal("expected error for invalid STORAGE")
+	}
+	cfg, err := Load(envFrom(map[string]string{"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s", "STORAGE": "disk", "STORAGE_PATH": "/tmp/x.db"}))
+	if err != nil || cfg.StorageBackend != "disk" || cfg.StoragePath != "/tmp/x.db" {
+		t.Fatalf("disk config wrong: %+v err=%v", cfg, err)
+	}
+}

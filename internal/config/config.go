@@ -11,33 +11,37 @@ import (
 
 // Config is the validated runtime configuration.
 type Config struct {
-	AlpacaBaseURL string
-	AlpacaKey     string
-	AlpacaSecret  string
-	AlpacaFeed    string
-	Watchlist     []string
-	PollInterval  time.Duration
-	Port          string
-	PprofAddr     string
-	CORSOrigin    string
-	OTLPEndpoint  string
-	ServiceName   string
+	AlpacaBaseURL  string
+	AlpacaKey      string
+	AlpacaSecret   string
+	AlpacaFeed     string
+	Watchlist      []string
+	PollInterval   time.Duration
+	Port           string
+	PprofAddr      string
+	CORSOrigin     string
+	OTLPEndpoint   string
+	ServiceName    string
+	StorageBackend string // "memory" (default) or "disk"
+	StoragePath    string // SQLite file path when StorageBackend == "disk"
 }
 
 // Load reads configuration using the provided getenv function (os.Getenv in
 // production, a fake in tests) and validates required fields.
 func Load(getenv func(string) string) (*Config, error) {
 	cfg := &Config{
-		AlpacaBaseURL: def(getenv("ALPACA_BASE_URL"), "https://data.alpaca.markets"),
-		AlpacaKey:     getenv("ALPACA_API_KEY"),
-		AlpacaSecret:  getenv("ALPACA_API_SECRET"),
-		AlpacaFeed:    def(getenv("ALPACA_FEED"), "iex"),
-		Watchlist:     parseList(getenv("WATCHLIST")),
-		Port:          def(getenv("PORT"), "8080"),
-		PprofAddr:     defAllowEmpty(getenv, "PPROF_ADDR", "127.0.0.1:6060"),
-		CORSOrigin:    def(getenv("CORS_ORIGIN"), "*"),
-		OTLPEndpoint:  getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-		ServiceName:   def(getenv("OTEL_SERVICE_NAME"), "alpaca-playground"),
+		AlpacaBaseURL:  def(getenv("ALPACA_BASE_URL"), "https://data.alpaca.markets"),
+		AlpacaKey:      getenv("ALPACA_API_KEY"),
+		AlpacaSecret:   getenv("ALPACA_API_SECRET"),
+		AlpacaFeed:     def(getenv("ALPACA_FEED"), "iex"),
+		Watchlist:      parseList(getenv("WATCHLIST")),
+		Port:           def(getenv("PORT"), "8080"),
+		PprofAddr:      defAllowEmpty(getenv, "PPROF_ADDR", "127.0.0.1:6060"),
+		CORSOrigin:     def(getenv("CORS_ORIGIN"), "*"),
+		OTLPEndpoint:   getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		ServiceName:    def(getenv("OTEL_SERVICE_NAME"), "alpaca-playground"),
+		StorageBackend: def(getenv("STORAGE"), "memory"),
+		StoragePath:    def(getenv("STORAGE_PATH"), "./data/cache.db"),
 	}
 
 	interval := 20 * time.Second
@@ -58,6 +62,11 @@ func Load(getenv func(string) string) (*Config, error) {
 		slog.Warn("ALPACA_BASE_URL looks misconfigured for market data",
 			"url", cfg.AlpacaBaseURL, "detail", w)
 	}
+
+	if cfg.StorageBackend != "memory" && cfg.StorageBackend != "disk" {
+		return nil, fmt.Errorf("STORAGE must be 'memory' or 'disk', got %q", cfg.StorageBackend)
+	}
+
 	return cfg, nil
 }
 
