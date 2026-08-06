@@ -21,6 +21,7 @@ import (
 	"github.com/mwasilew2/alpaca-playground/internal/poller"
 	"github.com/mwasilew2/alpaca-playground/internal/ranges"
 	"github.com/mwasilew2/alpaca-playground/internal/store"
+	"github.com/mwasilew2/alpaca-playground/internal/store/sqlitestore"
 )
 
 func main() {
@@ -55,7 +56,19 @@ func run() error {
 		return err
 	}
 
-	st := store.New(store.FetchFunc(client.GetBars), ranges.TTLForTimeframe)
+	var repo store.Repository
+	switch cfg.StorageBackend {
+	case "disk":
+		repo, err = sqlitestore.Open(cfg.StoragePath)
+		if err != nil {
+			return err
+		}
+	default:
+		repo = store.NewMemRepository()
+	}
+	defer repo.Close()
+
+	st := store.New(store.FetchFunc(client.GetBars), repo, ranges.TTLForTimeframe, ranges.LiveHorizonForTimeframe)
 	pl := poller.New(st, cfg.Watchlist, ranges.LiveTimeframes(), cfg.PollInterval)
 	api := httpapi.New(st, cfg.Watchlist, cfg.CORSOrigin)
 

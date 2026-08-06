@@ -3,8 +3,6 @@ package ranges
 import (
 	"testing"
 	"time"
-
-	"github.com/mwasilew2/alpaca-playground/internal/marketdata"
 )
 
 func TestResolve_AllRanges(t *testing.T) {
@@ -38,20 +36,6 @@ func TestSpecStart_AllUsesEpoch(t *testing.T) {
 	spec1h, _ := Resolve(R1h)
 	if got := spec1h.Start(now); !got.Equal(now.Add(-time.Hour)) {
 		t.Errorf("1h Start = %v, want now-1h", got)
-	}
-}
-
-func TestSlice(t *testing.T) {
-	base := time.Date(2026, 7, 9, 0, 0, 0, 0, time.UTC)
-	bars := []marketdata.Bar{
-		{T: base}, {T: base.Add(time.Minute)}, {T: base.Add(2 * time.Minute)},
-	}
-	got := Slice(bars, base.Add(time.Minute))
-	if len(got) != 2 || !got[0].T.Equal(base.Add(time.Minute)) {
-		t.Errorf("Slice returned %d bars, first %v", len(got), got[0].T)
-	}
-	if len(Slice(bars, base.Add(time.Hour))) != 0 {
-		t.Error("expected empty slice for start after all bars")
 	}
 }
 

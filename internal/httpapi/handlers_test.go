@@ -18,8 +18,19 @@ type fakeStore struct {
 	err  error
 }
 
+// Get mimics the real Store's contract: only bars within [start,end] are
+// returned (the store now owns that filtering; the handler no longer slices).
 func (f fakeStore) Get(ctx context.Context, symbol, timeframe string, start, end time.Time) ([]marketdata.Bar, error) {
-	return f.bars, f.err
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []marketdata.Bar
+	for _, b := range f.bars {
+		if !b.T.Before(start) && !b.T.After(end) {
+			out = append(out, b)
+		}
+	}
+	return out, nil
 }
 
 func newTestServer(src barSource) http.Handler {

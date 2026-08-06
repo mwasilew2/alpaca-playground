@@ -3,8 +3,6 @@ package ranges
 import (
 	"fmt"
 	"time"
-
-	"github.com/mwasilew2/alpaca-playground/internal/marketdata"
 )
 
 // Range is a user-selectable chart time range.
@@ -75,16 +73,6 @@ func AllRanges() []Range {
 	return out
 }
 
-// Slice returns the bars with T >= start. Input must be ascending by T.
-func Slice(bars []marketdata.Bar, start time.Time) []marketdata.Bar {
-	for i, b := range bars {
-		if !b.T.Before(start) {
-			return bars[i:]
-		}
-	}
-	return nil
-}
-
 // TTLForTimeframe is the cache freshness window for a timeframe. Intraday data
 // changes constantly; daily+ data changes at most once per day.
 func TTLForTimeframe(tf string) time.Duration {
@@ -109,4 +97,25 @@ func TTLForTimeframe(tf string) time.Duration {
 // LiveTimeframes are the intraday timeframes the poller keeps warm.
 func LiveTimeframes() []string {
 	return []string{"1Min", "5Min", "1Hour"}
+}
+
+// LiveHorizonForTimeframe is how far back from now bars are still mutable
+// (current/last-few periods + late trades). Older bars are treated as immutable.
+func LiveHorizonForTimeframe(tf string) time.Duration {
+	switch tf {
+	case "1Min":
+		return 15 * time.Minute
+	case "5Min":
+		return time.Hour
+	case "1Hour":
+		return 6 * time.Hour
+	case "1Day":
+		return 48 * time.Hour
+	case "1Week":
+		return 14 * 24 * time.Hour
+	case "1Month":
+		return 60 * 24 * time.Hour
+	default:
+		return 24 * time.Hour
+	}
 }

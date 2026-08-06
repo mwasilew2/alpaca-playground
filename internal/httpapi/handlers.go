@@ -114,15 +114,14 @@ func (s *Server) handleBars(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := ranges.Slice(bars, start)
-	if out == nil {
-		out = []marketdata.Bar{}
+	if bars == nil {
+		bars = []marketdata.Bar{}
 	}
 	writeJSON(w, http.StatusOK, barsResponse{
 		Symbol:    symbol,
 		Range:     rangeStr,
 		Timeframe: spec.Timeframe,
-		Bars:      out,
+		Bars:      bars,
 	})
 }
 

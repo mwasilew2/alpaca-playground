@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mwasilew2/alpaca-playground/internal/marketdata"
+	"github.com/mwasilew2/alpaca-playground/internal/observability"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -17,45 +18,75 @@ import (
 // FetchFunc loads bars for one symbol/timeframe over [start,end] from upstream.
 type FetchFunc func(ctx context.Context, symbol, timeframe string, start, end time.Time) ([]marketdata.Bar, error)
 
-type entry struct {
-	bars      []marketdata.Bar
-	start     time.Time // earliest start this entry covers
-	fetchedAt time.Time
-}
-
-// Store is a thread-safe read-through cache keyed by (symbol, timeframe).
+// Store is a read-through bar cache. It owns coverage/freshness/incremental-fetch
+// policy (pure interval math) and delegates storage to a Repository.
 type Store struct {
-	mu    sync.Mutex
-	data  map[string]entry
-	fetch FetchFunc
-	ttl   func(timeframe string) time.Duration
-	now   func() time.Time
+	fetch       FetchFunc
+	repo        Repository
+	ttl         func(timeframe string) time.Duration
+	liveHorizon func(timeframe string) time.Duration
+	now         func() time.Time
 
 	tracer trace.Tracer
 	hits   metric.Int64Counter
 	misses metric.Int64Counter
+
+	mu    sync.Mutex
+	locks map[string]*keyLock
 }
 
-// New creates a Store. ttl maps a timeframe to its freshness window.
-func New(fetch FetchFunc, ttl func(string) time.Duration) *Store {
+type keyLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// New builds a Store over repo. ttl and liveHorizon map a timeframe to its
+// freshness age and mutable-window (use ranges.TTLForTimeframe / LiveHorizonForTimeframe).
+func New(fetch FetchFunc, repo Repository, ttl, liveHorizon func(string) time.Duration) *Store {
 	m := otel.Meter("alpaca-playground/store")
 	hits, _ := m.Int64Counter("store.cache.hits")
 	misses, _ := m.Int64Counter("store.cache.misses")
 	return &Store{
-		data:   make(map[string]entry),
-		fetch:  fetch,
-		ttl:    ttl,
-		now:    time.Now,
-		tracer: otel.Tracer("alpaca-playground/store"),
-		hits:   hits,
-		misses: misses,
+		fetch:       fetch,
+		repo:        repo,
+		ttl:         ttl,
+		liveHorizon: liveHorizon,
+		now:         time.Now,
+		tracer:      otel.Tracer("alpaca-playground/store"),
+		hits:        hits,
+		misses:      misses,
+		locks:       make(map[string]*keyLock),
 	}
 }
 
 func key(symbol, timeframe string) string { return symbol + "|" + timeframe }
 
-// Get returns bars for the symbol/timeframe covering [start,end]. It serves a
-// fresh, covering cache entry, otherwise fetches upstream and caches the result.
+// lockKey serializes Gets for a single (symbol,timeframe) so concurrent callers
+// cannot double-fetch the same gap. Returns an unlock func.
+func (s *Store) lockKey(k string) func() {
+	s.mu.Lock()
+	kl := s.locks[k]
+	if kl == nil {
+		kl = &keyLock{}
+		s.locks[k] = kl
+	}
+	kl.refs++
+	s.mu.Unlock()
+
+	kl.mu.Lock()
+	return func() {
+		kl.mu.Unlock()
+		s.mu.Lock()
+		kl.refs--
+		if kl.refs == 0 {
+			delete(s.locks, k)
+		}
+		s.mu.Unlock()
+	}
+}
+
+// Get returns cached bars for the key within [start,end], fetching only the
+// never-covered gaps plus a stale live tail.
 func (s *Store) Get(ctx context.Context, symbol, timeframe string, start, end time.Time) ([]marketdata.Bar, error) {
 	ctx, span := s.tracer.Start(ctx, "store.Get", trace.WithAttributes(
 		attribute.String("symbol", symbol),
@@ -66,33 +97,74 @@ func (s *Store) Get(ctx context.Context, symbol, timeframe string, start, end ti
 	k := key(symbol, timeframe)
 	now := s.now()
 
-	s.mu.Lock()
-	e, ok := s.data[k]
-	fresh := ok && now.Sub(e.fetchedAt) < s.ttl(timeframe) && !e.start.After(start)
-	if fresh {
-		bars := e.bars
-		s.mu.Unlock()
+	unlock := s.lockKey(k)
+	defer unlock()
+
+	stored, err := s.repo.Intervals(ctx, symbol, timeframe)
+	if err != nil {
+		span.SetStatus(codes.Error, "read intervals failed")
+		observability.RecordError(ctx, observability.ComponentStore, observability.KindInternal, err)
+		return nil, err
+	}
+	liveHorizon := s.liveHorizon(timeframe)
+	// Plan reads each interval's own FetchedAt, so stored must be passed as-is
+	// (already normalized with per-region freshness) — NOT pre-Coalesced.
+	toFetch := Plan(stored, start, end, now, s.ttl(timeframe), liveHorizon)
+
+	if len(toFetch) == 0 {
 		span.SetAttributes(attribute.Bool("cache.hit", true))
 		if s.hits != nil {
 			s.hits.Add(ctx, 1)
 		}
-		return bars, nil
+		return s.repo.Bars(ctx, symbol, timeframe, start, end)
 	}
-	s.mu.Unlock()
 
-	span.SetAttributes(attribute.Bool("cache.hit", false))
-	// Fetch happens outside the lock; two concurrent misses for the same key may both fetch. Accepted tradeoff (no singleflight).
+	span.SetAttributes(attribute.Bool("cache.hit", false), attribute.Int("fetch.ranges", len(toFetch)))
 	if s.misses != nil {
 		s.misses.Add(ctx, 1)
 	}
-	bars, err := s.fetch(ctx, symbol, timeframe, start, end)
-	if err != nil {
-		span.SetStatus(codes.Error, "upstream fetch failed")
-		return nil, err
+
+	historyBefore := now.Add(-liveHorizon)
+	var fetchedIntervals []Interval
+	var freshBars []marketdata.Bar
+	persistFailed := false
+	var fetchErr error
+	for _, r := range toFetch {
+		bars, ferr := s.fetch(ctx, symbol, timeframe, r.From, r.To)
+		if ferr != nil {
+			fetchErr = ferr // alpaca client already recorded the error
+			break           // persist credit for ranges already fetched, then return
+		}
+		fetchedIntervals = append(fetchedIntervals, Interval{From: r.From, To: r.To, FetchedAt: now})
+		freshBars = append(freshBars, bars...)
+		if perr := s.repo.PutBars(ctx, symbol, timeframe, bars); perr != nil {
+			observability.RecordError(ctx, observability.ComponentStore, observability.KindInternal, perr)
+			persistFailed = true
+		}
 	}
 
-	s.mu.Lock()
-	s.data[k] = entry{bars: bars, start: start, fetchedAt: now}
-	s.mu.Unlock()
-	return bars, nil
+	// Persist coverage for the ranges we did fetch (partial credit if a later
+	// range failed), unless a bar write already failed for this call.
+	if len(fetchedIntervals) > 0 && !persistFailed {
+		newIntervals := normalizeCoverage(append(stored, fetchedIntervals...), historyBefore)
+		if perr := s.repo.PutIntervals(ctx, symbol, timeframe, newIntervals); perr != nil {
+			observability.RecordError(ctx, observability.ComponentStore, observability.KindInternal, perr)
+			persistFailed = true
+		}
+	}
+
+	if fetchErr != nil {
+		span.SetStatus(codes.Error, "upstream fetch failed")
+		return nil, fetchErr
+	}
+
+	if persistFailed {
+		// Degrade: serve from what the repo already had plus freshly-fetched bars.
+		repoBars, rerr := s.repo.Bars(ctx, symbol, timeframe, start, end)
+		if rerr != nil {
+			observability.RecordError(ctx, observability.ComponentStore, observability.KindInternal, rerr)
+		}
+		return clip(mergeBars(repoBars, freshBars), start, end), nil
+	}
+	return s.repo.Bars(ctx, symbol, timeframe, start, end)
 }

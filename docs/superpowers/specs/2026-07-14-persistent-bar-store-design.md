@@ -45,7 +45,8 @@ httpapi / poller
 │  1. intervals ← repo.Intervals(sym,tf)                                      │
 │  2. toFetch  ← coverage.Plan(intervals, start, end, now, ttl, liveHorizon)  │  PURE interval math
 │  3. for range in toFetch: bars ← fetch(...); repo.PutBars(bars)             │  keyed singleflight per (sym,tf)
-│  4. repo.PutIntervals( coverage.Coalesce(intervals ∪ fetched) )             │
+│  4. repo.PutIntervals( coverage.normalizeCoverage(intervals ∪ fetched,      │
+│        now − liveHorizon) )   // per-region freshness; history compacted     │
 │  5. return repo.Bars(sym,tf,start,end)         // engine slices             │
 └──────────────────────────────────┬─────────────────────────────────────────┘
                                     │ Repository port (driven)
@@ -72,19 +73,19 @@ type Interval struct {
 type Repository interface {
     // Bars returns cached bars for the key within [start,end], ascending by T.
     Bars(ctx context.Context, symbol, timeframe string, start, end time.Time) ([]marketdata.Bar, error)
-    // Intervals returns the stored (coalesced) fetched ranges for the key.
+    // Intervals returns the stored (normalized, per-region freshness) fetched ranges.
     Intervals(ctx context.Context, symbol, timeframe string) ([]Interval, error)
     // PutBars upserts bars, keyed by (symbol,timeframe,T); corrected live bars overwrite.
     PutBars(ctx context.Context, symbol, timeframe string, bars []marketdata.Bar) error
-    // PutIntervals replaces the key's stored interval set with the given (coalesced) set.
+    // PutIntervals replaces the key's stored interval set with the given (normalized) set.
     PutIntervals(ctx context.Context, symbol, timeframe string, intervals []Interval) error
     // Close releases resources (no-op for memory).
     Close() error
 }
 ```
 
-The core provides already-coalesced intervals to `PutIntervals`; the repo never
-coalesces. All interval algebra lives in `coverage.go` (pure).
+The core provides already-normalized intervals to `PutIntervals`; the repo never
+normalizes. All interval algebra lives in `coverage.go` (pure).
 
 ## 5. Coverage & Freshness (`internal/store/coverage.go`, pure)
 
@@ -107,10 +108,29 @@ coalesces. All interval algebra lives in `coverage.go` (pure).
 2. `toFetch = [start,end] − covered`; coalesce and merge sub-threshold slivers
    (a small gap-merge constant, e.g. a few bar-periods) to avoid micro-fetches.
 
-**`Coalesce([]Interval) → []Interval`:** merges overlapping/adjacent intervals,
-taking `FetchedAt = max`. Safe: merging only spans that touch; live-zone
-freshness is set by the newest interval that actually covers it; any freshness
-"overstatement" lands only on historical (immutable) sub-ranges.
+**`Coalesce([]Interval) → []Interval`:** merges overlapping/adjacent intervals
+into coverage ranges taking `FetchedAt = max`. Used ONLY internally by `Plan` on
+the *covered* set (where `FetchedAt` is irrelevant). It MUST NOT be used to merge
+the stored interval set, and `Plan` MUST be given the raw (un-Coalesced) stored
+intervals — see the correction below.
+
+**`normalizeCoverage([]Interval, historyBefore) → []Interval`:** the freshness-
+preserving normalizer used for persistence. It produces a minimal, sorted, non-
+overlapping set where each segment carries the most-recent `FetchedAt` of the
+intervals that actually cover it (an overlap-correct sweep). Adjacent **live**
+segments with different `FetchedAt` stay **distinct**; segments fully aged into
+history (`To ≤ historyBefore = now − liveHorizon`) merge freely (freshness moot),
+which bounds the set to roughly the live zone's width.
+
+> **Correction (freshness bug, fixed):** the original design coalesced the stored
+> set with `FetchedAt = max` and assumed "overstatement lands only on immutable
+> history." That is FALSE when a newer fetch merely *touches* an older, stale live
+> interval: the older live sub-range inherits the newer `FetchedAt` and is never
+> re-fetched (a stale/late-corrected live bar is silently blessed as fresh). Two
+> callers with different windows on one key (poller `now−window→now` vs. handler
+> `spec.Start(now)→now`) reach exactly this state. Fix: `Plan` reads each stored
+> interval's own `FetchedAt` (raw, not pre-Coalesced), and persistence uses
+> `normalizeCoverage`, which never merges differing freshness across the live zone.
 
 **Record fetch bounds even when empty:** after fetching `[gFrom,gTo]`, store
 `Interval{gFrom, gTo, now}` even if zero bars returned — this prevents
