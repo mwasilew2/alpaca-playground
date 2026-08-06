@@ -80,3 +80,14 @@ func TestPlan_BackfillGap(t *testing.T) {
 		t.Fatalf("got %+v, want backfill gap [0,5000]", got)
 	}
 }
+
+func TestPlan_MergesSubThresholdGaps(t *testing.T) {
+	now := at(10000)
+	// A tiny fresh covered island (30s wide, < sliverThreshold=1m) splits [0,now]
+	// into two gaps only 30s apart; mergeSlivers coalesces them into one fetch range.
+	iv := []Interval{{From: at(5000), To: at(5030), FetchedAt: at(9990)}}
+	got := Plan(iv, at(0), now, now, time.Hour, 100*time.Second)
+	if len(got) != 1 || !got[0].From.Equal(at(0)) || !got[0].To.Equal(now) {
+		t.Fatalf("got %+v, want single merged range [0,now]", got)
+	}
+}
