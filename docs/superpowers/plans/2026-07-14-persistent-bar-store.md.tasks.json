@@ -44,6 +44,7 @@
     {
       "id": "3",
       "subject": "Task 3: SQLite adapter (sqlitestore)",
+      "status": "completed",
       "blockedBy": ["2"],
       "files": [
         "internal/store/sqlitestore/sqlitestore.go",
