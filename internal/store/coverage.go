@@ -3,6 +3,8 @@ package store
 import (
 	"sort"
 	"time"
+
+	"github.com/mwasilew2/alpaca-playground/internal/marketdata"
 )
 
 // Interval is a fetched wall-clock range for one (symbol,timeframe). From/To are
@@ -123,6 +125,42 @@ func mergeSlivers(gaps []Range, threshold time.Duration) []Range {
 			continue
 		}
 		out = append(out, g)
+	}
+	return out
+}
+
+// mergeBars unions two ascending-or-unsorted bar slices, deduping by T (b wins on
+// a tie, being the fresher fetch), returning a slice sorted ascending by T.
+func mergeBars(a, b []marketdata.Bar) []marketdata.Bar {
+	idx := make(map[int64]marketdata.Bar, len(a)+len(b))
+	order := make([]int64, 0, len(a)+len(b))
+	add := func(bars []marketdata.Bar) {
+		for _, x := range bars {
+			ns := x.T.UnixNano()
+			if _, ok := idx[ns]; !ok {
+				order = append(order, ns)
+			}
+			idx[ns] = x
+		}
+	}
+	add(a)
+	add(b)
+	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
+	out := make([]marketdata.Bar, 0, len(order))
+	for _, ns := range order {
+		out = append(out, idx[ns])
+	}
+	return out
+}
+
+// clip returns the bars with start <= T <= end.
+func clip(bars []marketdata.Bar, start, end time.Time) []marketdata.Bar {
+	var out []marketdata.Bar
+	for _, b := range bars {
+		if b.T.Before(start) || b.T.After(end) {
+			continue
+		}
+		out = append(out, b)
 	}
 	return out
 }

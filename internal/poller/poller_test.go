@@ -20,7 +20,7 @@ func TestPoller_RefreshesAllSymbolsAndTimeframes(t *testing.T) {
 		mu.Unlock()
 		return nil, nil
 	}
-	st := store.New(fetch, func(string) time.Duration { return 0 }) // TTL 0 => always refetch
+	st := store.New(fetch, store.NewMemRepository(), func(string) time.Duration { return 0 }, func(string) time.Duration { return time.Hour }) // TTL 0 => always refetch
 	p := New(st, []string{"AAPL", "TSLA"}, []string{"1Min", "5Min"}, time.Hour)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -58,7 +58,7 @@ func TestPoller_ErrorDoesNotStopLoop(t *testing.T) {
 		}
 		return nil, nil
 	}
-	st := store.New(fetch, func(string) time.Duration { return 0 })
+	st := store.New(fetch, store.NewMemRepository(), func(string) time.Duration { return 0 }, func(string) time.Duration { return time.Hour })
 	p := New(st, []string{"BAD", "GOOD"}, []string{"1Min"}, time.Hour)
 
 	ctx, cancel := context.WithCancel(context.Background())
