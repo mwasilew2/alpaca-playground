@@ -37,9 +37,12 @@ func maxTime(a, b time.Time) time.Time {
 	return b
 }
 
-// Coalesce merges overlapping/adjacent intervals (sorted by From), taking
+// coalesce merges overlapping/adjacent intervals (sorted by From), taking
 // FetchedAt = max within each merged group. Returns a new minimal, sorted set.
-func Coalesce(in []Interval) []Interval {
+// Unexported by design: it collapses freshness and MUST NOT be used to merge the
+// stored interval set (use normalizeCoverage). It is safe only inside Plan, on the
+// covered set, where FetchedAt is never read afterwards.
+func coalesce(in []Interval) []Interval {
 	if len(in) == 0 {
 		return nil
 	}
@@ -149,7 +152,7 @@ func Plan(intervals []Interval, start, end, now time.Time, ttl, liveHorizon time
 			covered = append(covered, Interval{From: lStart, To: t})
 		}
 	}
-	covered = Coalesce(covered)
+	covered = coalesce(covered)
 	return mergeSlivers(subtract(start, end, covered), sliverThreshold)
 }
 

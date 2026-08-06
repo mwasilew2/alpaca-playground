@@ -19,7 +19,7 @@ func TestCoalesce(t *testing.T) {
 		{From: at(25), To: at(30), FetchedAt: at(50)},  // touches -> merge
 		{From: at(40), To: at(50), FetchedAt: at(60)},  // disjoint
 	}
-	got := Coalesce(in)
+	got := coalesce(in)
 	if len(got) != 2 {
 		t.Fatalf("got %d intervals, want 2: %+v", len(got), got)
 	}
