@@ -1,10 +1,12 @@
 {
   "plan": "docs/superpowers/plans/2026-07-14-persistent-bar-store.md",
   "spec": "docs/superpowers/specs/2026-07-14-persistent-bar-store-design.md",
+  "lastUpdated": "2026-08-06T08:32:05Z",
   "tasks": [
     {
       "id": "1",
       "subject": "Task 1: Coverage interval math (pure)",
+      "status": "completed",
       "blockedBy": [],
       "files": ["internal/store/coverage.go", "internal/store/coverage_test.go"],
       "verifyCommand": "go test ./internal/store/ -run 'Coalesce|Plan' -race -v",
@@ -59,6 +61,7 @@
     {
       "id": "4",
       "subject": "Task 4: Config — storage backend selection",
+      "status": "completed",
       "blockedBy": [],
       "files": ["internal/config/config.go", "internal/config/config_test.go", ".env.example"],
       "verifyCommand": "go test ./internal/config/... -race -v",
