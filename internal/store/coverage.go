@@ -62,8 +62,68 @@ func Coalesce(in []Interval) []Interval {
 	return out
 }
 
+// normalizeCoverage collapses a set of fetched intervals into a minimal, sorted,
+// non-overlapping set that PRESERVES per-region freshness. Unlike Coalesce (which
+// takes FetchedAt = max across a whole merged span and would overstate the
+// freshness of an older sub-range that a newer neighbour merely touches), each
+// output segment carries the most-recent FetchedAt of the intervals that actually
+// cover it. Adjacent live segments with different FetchedAt stay distinct — so a
+// stale live sub-range is never masked by a fresher neighbour. Segments that have
+// aged entirely into history (To <= historyBefore) merge freely regardless of
+// FetchedAt, since Plan ignores freshness for immutable history; this bounds the
+// set to roughly the live zone's width.
+func normalizeCoverage(in []Interval, historyBefore time.Time) []Interval {
+	// Distinct boundaries of all non-empty intervals partition the timeline into
+	// elementary segments that lie wholly inside or wholly outside each interval.
+	var bounds []time.Time
+	for _, iv := range in {
+		if iv.From.Before(iv.To) {
+			bounds = append(bounds, iv.From, iv.To)
+		}
+	}
+	if len(bounds) == 0 {
+		return nil
+	}
+	sort.Slice(bounds, func(i, j int) bool { return bounds[i].Before(bounds[j]) })
+	uniq := bounds[:1]
+	for _, b := range bounds[1:] {
+		if !b.Equal(uniq[len(uniq)-1]) {
+			uniq = append(uniq, b)
+		}
+	}
+
+	var out []Interval
+	for i := 0; i+1 < len(uniq); i++ {
+		lo, hi := uniq[i], uniq[i+1]
+		var fa time.Time
+		covered := false
+		for _, iv := range in {
+			if !iv.From.After(lo) && !iv.To.Before(hi) { // iv.From <= lo && iv.To >= hi
+				covered = true
+				fa = maxTime(fa, iv.FetchedAt)
+			}
+		}
+		if !covered {
+			continue // a genuine gap between fetched intervals
+		}
+		if n := len(out); n > 0 && out[n-1].To.Equal(lo) {
+			last := &out[n-1]
+			bothHistorical := !last.To.After(historyBefore) && !hi.After(historyBefore)
+			if bothHistorical || last.FetchedAt.Equal(fa) {
+				last.To = hi
+				last.FetchedAt = maxTime(last.FetchedAt, fa)
+				continue
+			}
+		}
+		out = append(out, Interval{From: lo, To: hi, FetchedAt: fa})
+	}
+	return out
+}
+
 // Plan returns the sub-ranges of [start,end] that must be fetched: never-covered
-// gaps plus a stale live tail. intervals should already be Coalesced. ttl is the
+// gaps plus a stale live tail. intervals must be non-overlapping with per-region
+// FetchedAt (see normalizeCoverage); Plan reads each interval's own FetchedAt, so
+// it must NOT be pre-Coalesced (that would overstate live freshness). ttl is the
 // freshness age for the live zone; liveHorizon is how far back from now bars are
 // still mutable. now is injected.
 func Plan(intervals []Interval, start, end, now time.Time, ttl, liveHorizon time.Duration) []Range {

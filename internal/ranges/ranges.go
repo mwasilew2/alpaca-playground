@@ -3,8 +3,6 @@ package ranges
 import (
 	"fmt"
 	"time"
-
-	"github.com/mwasilew2/alpaca-playground/internal/marketdata"
 )
 
 // Range is a user-selectable chart time range.
@@ -73,16 +71,6 @@ func AllRanges() []Range {
 		out = append(out, r)
 	}
 	return out
-}
-
-// Slice returns the bars with T >= start. Input must be ascending by T.
-func Slice(bars []marketdata.Bar, start time.Time) []marketdata.Bar {
-	for i, b := range bars {
-		if !b.T.Before(start) {
-			return bars[i:]
-		}
-	}
-	return nil
 }
 
 // TTLForTimeframe is the cache freshness window for a timeframe. Intraday data

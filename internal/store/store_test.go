@@ -146,3 +146,65 @@ func TestGet_PersistFailureStillServes(t *testing.T) {
 		t.Fatalf("degraded serve wrong: %+v", got)
 	}
 }
+
+// TestGet_IncrementalTailDoesNotBlessStaleLive is the end-to-end regression test
+// for the freshness bug. Two earlier Gets at different times build two ADJACENT
+// stored intervals with different FetchedAt (an old one and a newer touching one).
+// A third Get, by which time the old interval is stale but the newer one is still
+// fresh, must re-fetch the stale sub-range — the newer neighbour must NOT bless it
+// as fresh. Under the old Coalesce(FetchedAt=max) persistence, the two intervals
+// merged into one fresh interval and the stale sub-range was never re-fetched.
+func TestGet_IncrementalTailDoesNotBlessStaleLive(t *testing.T) {
+	type fr struct{ from, to time.Time }
+	var mu sync.Mutex
+	var recorded []fr
+	fetch := func(_ context.Context, s, tf string, start, end time.Time) ([]marketdata.Bar, error) {
+		mu.Lock()
+		recorded = append(recorded, fr{start, end})
+		mu.Unlock()
+		return []marketdata.Bar{{T: start.Add(time.Second)}}, nil
+	}
+	repo := newFakeRepo()
+	// TTL 60s; liveHorizon huge so the whole span stays in the mutable live zone.
+	st := New(fetch, repo, fixedTTL(60*time.Second), fixedLive(24*time.Hour))
+	var nowT time.Time
+	st.now = func() time.Time { return nowT }
+
+	base := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	p0, p1, p2 := base, base.Add(60*time.Second), base.Add(120*time.Second)
+
+	// Get 1 @ base: fetch [p0,p1], stamped FetchedAt=base.
+	nowT = base
+	if _, err := st.Get(context.Background(), "AAPL", "1Min", p0, p1); err != nil {
+		t.Fatal(err)
+	}
+	// Get 2 @ base+30s: fetch the adjacent tail [p1,p2], stamped FetchedAt=base+30s.
+	// Persistence must keep [p0,p1]@base and [p1,p2]@base+30 DISTINCT.
+	nowT = base.Add(30 * time.Second)
+	if _, err := st.Get(context.Background(), "AAPL", "1Min", p1, p2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get 3 @ base+70s (freshAfter=base+10s): [p0,p1]@base is stale, [p1,p2]@base+30
+	// is fresh. The stale sub-range around base+30s must be re-fetched.
+	mu.Lock()
+	recorded = nil
+	mu.Unlock()
+	nowT = base.Add(70 * time.Second)
+	if _, err := st.Get(context.Background(), "AAPL", "1Min", p0, p2); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := base.Add(30 * time.Second) // inside the older, now-stale [p0,p1]
+	mu.Lock()
+	defer mu.Unlock()
+	covered := false
+	for _, r := range recorded {
+		if !r.from.After(stale) && !r.to.Before(stale) {
+			covered = true
+		}
+	}
+	if !covered {
+		t.Errorf("stale live sub-range at %v was not re-fetched on the 3rd Get; ranges=%v", stale, recorded)
+	}
+}

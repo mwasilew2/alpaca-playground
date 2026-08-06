@@ -81,6 +81,80 @@ func TestPlan_BackfillGap(t *testing.T) {
 	}
 }
 
+func TestNormalizeCoverage_PreservesLiveFreshness(t *testing.T) {
+	// X and Y touch at t1000 but were fetched at different times. Coalesce would
+	// merge them and stamp X's range with Y's newer FetchedAt (the bug).
+	// normalizeCoverage keeps them distinct while both are live.
+	x := Interval{From: at(700), To: at(1000), FetchedAt: at(1000)}
+	y := Interval{From: at(1000), To: at(1140), FetchedAt: at(1140)}
+	got := normalizeCoverage([]Interval{x, y}, at(500)) // both live (To > 500)
+	if len(got) != 2 {
+		t.Fatalf("want 2 distinct intervals, got %d: %+v", len(got), got)
+	}
+	if !got[0].From.Equal(at(700)) || !got[0].To.Equal(at(1000)) || !got[0].FetchedAt.Equal(at(1000)) {
+		t.Errorf("segment[0] = %+v, want [700,1000]@1000", got[0])
+	}
+	if !got[1].From.Equal(at(1000)) || !got[1].To.Equal(at(1140)) || !got[1].FetchedAt.Equal(at(1140)) {
+		t.Errorf("segment[1] = %+v, want [1000,1140]@1140", got[1])
+	}
+}
+
+func TestNormalizeCoverage_CompactsHistory(t *testing.T) {
+	// Same touching intervals, but now both are historical (To <= historyBefore):
+	// freshness is irrelevant, so they collapse to a single interval (bounds growth).
+	x := Interval{From: at(700), To: at(1000), FetchedAt: at(1000)}
+	y := Interval{From: at(1000), To: at(1140), FetchedAt: at(1140)}
+	got := normalizeCoverage([]Interval{x, y}, at(2000)) // both fully historical
+	if len(got) != 1 || !got[0].From.Equal(at(700)) || !got[0].To.Equal(at(1140)) {
+		t.Fatalf("want single merged historical interval [700,1140], got %+v", got)
+	}
+}
+
+func TestNormalizeCoverage_OverlapNewestWins(t *testing.T) {
+	// Overlapping fetches: the overlap [1000,1100] takes the newer FetchedAt and
+	// merges with [1100,1200]; the older interval's exclusive left part [700,1000]
+	// keeps its own older FetchedAt.
+	x := Interval{From: at(700), To: at(1100), FetchedAt: at(1000)}
+	y := Interval{From: at(1000), To: at(1200), FetchedAt: at(1200)}
+	got := normalizeCoverage([]Interval{x, y}, at(0)) // all live
+	if len(got) != 2 {
+		t.Fatalf("want 2 intervals, got %d: %+v", len(got), got)
+	}
+	if !got[0].From.Equal(at(700)) || !got[0].To.Equal(at(1000)) || !got[0].FetchedAt.Equal(at(1000)) {
+		t.Errorf("segment[0] = %+v, want [700,1000]@1000", got[0])
+	}
+	if !got[1].From.Equal(at(1000)) || !got[1].To.Equal(at(1200)) || !got[1].FetchedAt.Equal(at(1200)) {
+		t.Errorf("segment[1] = %+v, want [1000,1200]@1200", got[1])
+	}
+}
+
+func TestPlan_CombinedHistoricalGapAndStaleLiveTail(t *testing.T) {
+	now := at(10000)
+	ttl := 100 * time.Second
+	live := 200 * time.Second // liveStart = 9800, freshAfter = 9900
+	// A fresh historical island [4000,5000], plus an old fetch [9000,now] whose
+	// live tail is stale. One Plan call must yield BOTH historical gaps AND the
+	// stale live tail.
+	iv := []Interval{
+		{From: at(4000), To: at(5000), FetchedAt: at(9990)},
+		{From: at(9000), To: now, FetchedAt: at(1000)},
+	}
+	got := Plan(iv, at(0), now, now, ttl, live)
+	want := []Range{
+		{From: at(0), To: at(4000)},    // historical backfill
+		{From: at(5000), To: at(9000)}, // historical gap between islands
+		{From: at(9800), To: now},      // stale live tail [now-live, now]
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d ranges, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if !got[i].From.Equal(want[i].From) || !got[i].To.Equal(want[i].To) {
+			t.Errorf("range[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestPlan_MergesSubThresholdGaps(t *testing.T) {
 	now := at(10000)
 	// A tiny fresh covered island (30s wide, < sliverThreshold=1m) splits [0,now]

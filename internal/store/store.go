@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -101,11 +102,14 @@ func (s *Store) Get(ctx context.Context, symbol, timeframe string, start, end ti
 
 	stored, err := s.repo.Intervals(ctx, symbol, timeframe)
 	if err != nil {
+		span.SetStatus(codes.Error, "read intervals failed")
 		observability.RecordError(ctx, observability.ComponentStore, observability.KindInternal, err)
 		return nil, err
 	}
-	coalesced := Coalesce(stored)
-	toFetch := Plan(coalesced, start, end, now, s.ttl(timeframe), s.liveHorizon(timeframe))
+	liveHorizon := s.liveHorizon(timeframe)
+	// Plan reads each interval's own FetchedAt, so stored must be passed as-is
+	// (already normalized with per-region freshness) — NOT pre-Coalesced.
+	toFetch := Plan(stored, start, end, now, s.ttl(timeframe), liveHorizon)
 
 	if len(toFetch) == 0 {
 		span.SetAttributes(attribute.Bool("cache.hit", true))
@@ -120,13 +124,16 @@ func (s *Store) Get(ctx context.Context, symbol, timeframe string, start, end ti
 		s.misses.Add(ctx, 1)
 	}
 
+	historyBefore := now.Add(-liveHorizon)
 	var fetchedIntervals []Interval
 	var freshBars []marketdata.Bar
 	persistFailed := false
+	var fetchErr error
 	for _, r := range toFetch {
-		bars, err := s.fetch(ctx, symbol, timeframe, r.From, r.To)
-		if err != nil {
-			return nil, err // alpaca client already recorded the error
+		bars, ferr := s.fetch(ctx, symbol, timeframe, r.From, r.To)
+		if ferr != nil {
+			fetchErr = ferr // alpaca client already recorded the error
+			break           // persist credit for ranges already fetched, then return
 		}
 		fetchedIntervals = append(fetchedIntervals, Interval{From: r.From, To: r.To, FetchedAt: now})
 		freshBars = append(freshBars, bars...)
@@ -135,17 +142,28 @@ func (s *Store) Get(ctx context.Context, symbol, timeframe string, start, end ti
 			persistFailed = true
 		}
 	}
-	newIntervals := Coalesce(append(coalesced, fetchedIntervals...))
-	if !persistFailed {
+
+	// Persist coverage for the ranges we did fetch (partial credit if a later
+	// range failed), unless a bar write already failed for this call.
+	if len(fetchedIntervals) > 0 && !persistFailed {
+		newIntervals := normalizeCoverage(append(stored, fetchedIntervals...), historyBefore)
 		if perr := s.repo.PutIntervals(ctx, symbol, timeframe, newIntervals); perr != nil {
 			observability.RecordError(ctx, observability.ComponentStore, observability.KindInternal, perr)
 			persistFailed = true
 		}
 	}
 
+	if fetchErr != nil {
+		span.SetStatus(codes.Error, "upstream fetch failed")
+		return nil, fetchErr
+	}
+
 	if persistFailed {
 		// Degrade: serve from what the repo already had plus freshly-fetched bars.
-		repoBars, _ := s.repo.Bars(ctx, symbol, timeframe, start, end)
+		repoBars, rerr := s.repo.Bars(ctx, symbol, timeframe, start, end)
+		if rerr != nil {
+			observability.RecordError(ctx, observability.ComponentStore, observability.KindInternal, rerr)
+		}
 		return clip(mergeBars(repoBars, freshBars), start, end), nil
 	}
 	return s.repo.Bars(ctx, symbol, timeframe, start, end)
