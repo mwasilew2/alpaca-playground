@@ -21,6 +21,7 @@
     {
       "id": "2",
       "subject": "Task 2: Repository port + memRepo + contract suite",
+      "status": "completed",
       "blockedBy": ["1"],
       "files": [
         "internal/store/repository.go",
