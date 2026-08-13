@@ -87,6 +87,35 @@ func TestGet_MissThenHit(t *testing.T) {
 	}
 }
 
+// TestGet_RepeatRequestWithMovingEndIsAHit pins the trailing-gap rule end to
+// end. httpapi and poller both pass end=time.Now(), so a second request always
+// covers a sliver the first did not; without the rule every request was a miss
+// and store.cache.hits could never fire.
+func TestGet_RepeatRequestWithMovingEndIsAHit(t *testing.T) {
+	var calls atomic.Int32
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	fetch := func(_ context.Context, s, tf string, start, end time.Time) ([]marketdata.Bar, error) {
+		calls.Add(1)
+		return []marketdata.Bar{{T: start.Add(time.Minute)}}, nil
+	}
+	st := New(fetch, newFakeRepo(), fixedTTL(time.Hour), fixedLive(2*time.Hour))
+	st.now = func() time.Time { return now }
+
+	start := now.Add(-30 * time.Minute)
+	if _, err := st.Get(context.Background(), "AAPL", "1Min", start, now); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		now = now.Add(200 * time.Millisecond) // the clock moves between requests
+		if _, err := st.Get(context.Background(), "AAPL", "1Min", start, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Errorf("fetch called %d times, want 1: 5 requests 200ms apart", calls.Load())
+	}
+}
+
 func TestGet_RecordsEmptyIntervalNoRefetch(t *testing.T) {
 	var calls atomic.Int32
 	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)

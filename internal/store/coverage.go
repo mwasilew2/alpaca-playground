@@ -129,6 +129,9 @@ func normalizeCoverage(in []Interval, historyBefore time.Time) []Interval {
 // it must NOT be pre-Coalesced (that would overstate live freshness). ttl is the
 // freshness age for the live zone; liveHorizon is how far back from now bars are
 // still mutable. now is injected.
+//
+// A trailing gap that begins within ttl of now is forgiven; see
+// forgiveTrailingGap.
 func Plan(intervals []Interval, start, end, now time.Time, ttl, liveHorizon time.Duration) []Range {
 	if !start.Before(end) {
 		return nil
@@ -153,7 +156,35 @@ func Plan(intervals []Interval, start, end, now time.Time, ttl, liveHorizon time
 		}
 	}
 	covered = coalesce(covered)
-	return mergeSlivers(subtract(start, end, covered), sliverThreshold)
+	gaps := forgiveTrailingGap(subtract(start, end, covered), start, end, freshAfter)
+	return mergeSlivers(gaps, sliverThreshold)
+}
+
+// forgiveTrailingGap drops a final gap that only exists because the clock moved.
+//
+// Callers ask for [start, now()], so a request arriving a moment after the last
+// one finds its final instants uncovered however recently everything before them
+// was fetched. Fetching that sliver makes the ttl unreachable: every request is a
+// miss, and each leaves behind another interval whose FetchedAt cannot merge with
+// its neighbours, so the stored set grows one entry per poll tick.
+//
+// Forgiving it is only what the ttl already promises — data may be up to ttl old
+// — so it narrows no guarantee. Three conditions keep it narrow: the gap must be
+// last and reach end, so interior gaps (real holes, not clock drift) are
+// untouched; it must begin after freshAfter, so a tail wider than the ttl is
+// still fetched; and something must precede it, so a cold cache always fetches.
+//
+// Applied before mergeSlivers, since a merged gap is no longer identifiable as
+// trailing.
+func forgiveTrailingGap(gaps []Range, start, end, freshAfter time.Time) []Range {
+	if len(gaps) == 0 {
+		return gaps
+	}
+	last := gaps[len(gaps)-1]
+	if last.To.Equal(end) && last.From.After(start) && last.From.After(freshAfter) {
+		return gaps[:len(gaps)-1]
+	}
+	return gaps
 }
 
 // subtract returns [start,end] minus the covered set (sorted, coalesced, each

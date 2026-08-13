@@ -165,3 +165,47 @@ func TestPlan_MergesSubThresholdGaps(t *testing.T) {
 		t.Fatalf("got %+v, want single merged range [0,now]", got)
 	}
 }
+
+func TestPlan_ForgivesTrailingGapWithinTTL(t *testing.T) {
+	now := at(10000)
+	// Callers pass end=now(), so a repeat request always finds its final
+	// instants uncovered. Chasing that sliver makes the ttl unreachable: every
+	// request is a miss, and each leaves an interval that cannot merge.
+	iv := []Interval{{From: at(0), To: at(9990), FetchedAt: at(9990)}}
+	if got := Plan(iv, at(0), now, now, 100*time.Second, 200*time.Second); len(got) != 0 {
+		t.Fatalf("expected the 10s trailing gap to be forgiven, got %+v", got)
+	}
+}
+
+func TestPlan_StillFetchesTrailingGapWiderThanTTL(t *testing.T) {
+	now := at(10000)
+	// Fetched 10s ago (fresh) but only reached at(9800): a 200s tail, wider
+	// than the 100s ttl, so the ttl cannot excuse it.
+	iv := []Interval{{From: at(0), To: at(9800), FetchedAt: at(9990)}}
+	got := Plan(iv, at(0), now, now, 100*time.Second, 400*time.Second)
+	if len(got) != 1 || !got[0].From.Equal(at(9800)) || !got[0].To.Equal(now) {
+		t.Fatalf("got %+v, want the trailing gap [9800, now]", got)
+	}
+}
+
+func TestPlan_NeverForgivesAColdCache(t *testing.T) {
+	now := at(10000)
+	// The whole window is inside the last ttl, but nothing precedes the gap:
+	// there is no recent fetch to excuse it.
+	got := Plan(nil, at(9950), now, now, 100*time.Second, 200*time.Second)
+	if len(got) != 1 || !got[0].From.Equal(at(9950)) || !got[0].To.Equal(now) {
+		t.Fatalf("got %+v, want the whole window fetched", got)
+	}
+}
+
+func TestPlan_ForgivesOnlyTheTrailingGap(t *testing.T) {
+	now := at(10000) // freshAfter = 9900
+	iv := []Interval{
+		{From: at(0), To: at(9000), FetchedAt: at(9990)},
+		{From: at(9950), To: at(9990), FetchedAt: at(9990)},
+	}
+	got := Plan(iv, at(0), now, now, 100*time.Second, 2000*time.Second)
+	if len(got) != 1 || !got[0].From.Equal(at(9000)) || !got[0].To.Equal(at(9950)) {
+		t.Fatalf("got %+v, want only the interior gap [9000,9950]", got)
+	}
+}
